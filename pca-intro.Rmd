@@ -1,0 +1,483 @@
+---
+title: "Introduction to PCA"
+output: 
+  html_document:
+    keep_md: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Principal Component Analysis (PCA) is a dimension reduction technique that was first formulated by Karl Pearson already in 1901. In this introduction, we will walk through the underlying theory of PCA, show how to run it in R, and interpret the results. We will work with small data sets throughout, where we can interpret the variables and make individual plots.
+
+# Preparation
+
+We start by loading some R packages that we will use later on for plotting and some data wrangling. If you are not familiar with these packages, that's not a problem; all necessary code will be provided.
+
+```{r}
+suppressPackageStartupMessages({
+  library(ggplot2)
+  library(ggrepel)
+  library(ggcorrplot)
+  library(dplyr)
+  library(tibble)
+})
+```
+
+
+We also take a first look at the data set we will be using (`mtcars`). This is a built-in data set in R, which contains data on fuel consumption and aspects of design and performance for 32 types of cars (1973-1974 models).
+
+```{r}
+mtcars
+```
+
+We can get more information about the variables by typing ?mtcars, which tells us what the different columns mean:
+
+```{r}
+?mtcars
+```
+
+```{r, results = "as.is", eval = FALSE}
+A data frame with 32 observations on 11 (numeric) variables.
+
+   [, 1]  mpg   Miles/(US) gallon
+   [, 2]  cyl   Number of cylinders
+   [, 3]  disp  Displacement (cu.in.)
+   [, 4]  hp    Gross horsepower
+   [, 5]  drat  Rear axle ratio
+   [, 6]  wt    Weight (1000 lbs)
+   [, 7]  qsec  1/4 mile time
+   [, 8]  vs    Engine (0 = V-shaped, 1 = straight)
+   [, 9]  am    Transmission (0 = automatic, 1 = manual)
+   [,10]  gear  Number of forward gears
+   [,11]  carb  Number of carburetors
+```
+
+For later reference, we'll also plot the correlations among the variables.
+
+```{r}
+ggcorrplot(round(cor(mtcars),3), 
+           hc.order = TRUE, 
+           lab = TRUE, 
+           lab_size = 3, 
+           method = "circle", 
+           colors = c("tomato2", "white", "blue"), 
+           title = "Correlations among variables", 
+           ggtheme = theme_bw)
+```
+
+We note that there seem to be two groups of variables, which show a positive correlation within each group and a negative correlation with variables from the other group. One group consists of the number of cylinders, the number of carburators, the weight, the horsepower and the displacement. The other group consists of the number of gears, the transmission type, the rear axle ratio, the miles per gallon, the engine type and the time to go 1/4 mile.
+
+# Why dimension reduction?
+
+The _dimensionality_ of a data set is used to refer to the number of measured features, or variables in the data set. In other words, if you measure the expression levels of five genes in 100,000 cells, the dimensionality of your data set is 5, and if you perform an RNA-seq experiment in a couple of samples, the dimensionality of the data set is the number of genes that you quantify (in the order of tens of thousands). Dimension reduction (or dimensionality reduction) is the process of, well, reducing the dimensionality of the data set. This can be useful for several reasons, two of the more common ones being plotting (we're limited in the number of dimensions we can represent graphically) and preprocessing for other tasks (e.g., to reduce both the number of variables and the correlation among them, which can be an issue e.g. for linear regression). Of course, reducing the dimensionality is typically bound to also lose some 'information' in the data; after all, the data does live in a high-dimensional space. However, by constructing the dimension reduction in a clever way, we can minimize this information loss. Moreover, in many cases it's actually desirable to reduce the data set to the strongest signals only - see it as a kind of noise reduction.
+
+There are many ways of doing dimensionality reduction - for example, we can select the first two variables from our data set, which immediately reduces the dimensionality to 2! However, we'll likely miss a lot of information (in particular, all information encoded in the other variables), and moreover we can not see effects depending on interactions between more than two variables. The other option is to somehow _combine_ the information from all the variables into a few 'summary features'. These features can be created in different ways - either explicitly as, e.g., linear combinations of the original variables, or implicitly by just defining their value for each of the samples in the data set. PCA is an example of the first approach, where the summary features (principal components) are linear combinations (weighted sums) of the original variables. As we will see, one advantage of this is that it allows us to directly measure the impact (or contribution) of each original variable on each of the summary features. The disadvantage is that we are somewhat limited in the scope of summary features that we can generate. 
+
+## Linear combinations and projections
+
+We'll make a small detour to gain a better understanding of linear combinations, and how they relate to projections. In order to do this, we create a small, two-dimensional data set:
+
+```{r}
+set.seed(2)
+df <- data.frame(x = rnorm(50)) %>% 
+  dplyr::mutate(y = x + rnorm(50, sd = 0.5))
+ggplot(df, aes(x = x, y = y)) + coord_fixed() + geom_point(size = 5) + theme_bw()
+```
+
+Here we have two variables; $x$ and $y$. A linear combination of these two variables is a feature of the form $$z = ax + by$$for any numbers $a$ and $b$. For example, we can set $a=1, b=0$ to get $z=x$, or $a=b=1/2$ to get the average of $x$ and $y$.
+
+Calculating such a linear combination can be related to projecting the points above onto a line through the origin in the two-dimensional space. For example, let's choose the line to be the x-axis. We define a vector of unit length, pointing in the direction of the x-axis, as  (1,0) . Projecting any point $(x_i,y_i)$ onto this axis now amounts to calculating the dot product between (1,0) and $(x_i,y_i)$, that is, $$1\cdot x_i + 0\cdot y_i = x_i.$$
+ 
+The interpretation of this is that along the axis defined by the direction (1,0), the coordinate of the point $(x_i,y_i)$ (=the distance from the origin) is equal to $x_i$. This makes sense, since here we project onto the x-axis, and the coordinate of each point is indeed the x-coordinate of that point. We visualize the projection of one point below:
+
+```{r}
+ggplot(df) + coord_fixed() + geom_point(aes(x = x, y = y), size = 5) + theme_bw() + 
+  geom_segment(aes(x = 0, y = 0, xend = 1, yend = 0), 
+               arrow = arrow(length = unit(0.03, "npc")), size = 2, color = "red") + 
+  geom_point(data = df[7, ], aes(x = x, y = y), size = 5, color = "blue") + 
+  geom_segment(data = df[7, ], aes(x = x, y = y, xend = x, yend = 0),
+               arrow = arrow(length = unit(0.03, "npc")), color = "blue") + 
+  geom_point(data = df[7, ], aes(x = x, y = 0), shape = 1, 
+             color = "blue", size = 4.75, stroke = 1.25)
+```
+
+Before moving on, let's clarify one aspect that is often confusing. The dot product calculated above gave us the coordinate of a point along a given axis in the two-dimensional space. This is comparable to saying that for the point $(x_i,y_i)$ (in two dimensions), $x_i$ (a scalar value) is the coordinate along the $x$-axis, and $y_i$ (a scalar value) is the coordinate along the $y$-axis. Now, the actual projected _point_ (the hollow circle in the plot above) _still lives in the two-dimensional space_! The projected point in this two-dimensional space is given by the coordinate ($x_i$) times the projection axis $(1, 0)$, that is, $(x_i, 0)$. 
+
+The fact that projecting a collection of data points onto an axis (or more generally, onto a plane, or another linear subspace) keeps it in the same ambient space is important, if we want to be able to compare the point cloud before and after the projection. However, we can now _choose_ to represent our points in a _new_, 1-dimensional space, where the $x$-axis is given by the chosen projection axis. We can no longer compare the coordinates directly to the original ones (since the basis of the spaces are different), but now we have truly achieved dimension reduction, since the points are now represented in a space with fewer coordinate axes. 
+
+Of course, we are not restricted to projecting onto coordinate axes. Let's take another example, and define the direction that we want to project onto as $$v=\left(\frac{1}{\sqrt{2}}, \frac{1}{\sqrt{2}}\right).$$Now, the projected coordinate (__along the defined axis__) for a point $(x_i, y_i)$ is obtained as $$\frac{1}{\sqrt{2}}\cdot x_i + \frac{1}{\sqrt{2}}\cdot y_i.$$Denoting the $N\times 2$ matrix with original $x$- and $y$-coordinates by $M$ (the number of rows $N$ is the number of points), and considering $v$ as a $2\times 1$ column vector, we can compute the coordinates along the new axis by matrix multiplication:$$z=Mv$$ 
+
+Note that the components $(v_x, v_y)$ of $v$ were chosen such the the length (or norm) of $v$, calculated as $$\lvert v \rvert = \sqrt{{v_x}^2 + {v_y}^2}$$ is equal to 1. In other words, $v$ is a unit vector. Working with unit vectors is common practice when defining the basis vectors of a space - for example, the typical basis vectors of a two-dimensional Euclidean space are $(1,0)$ and $(0,1)$, both unit vectors. This implies that the coordinate of a point along each of these axes can be represented by the distance from the origin to the point along that axis. In this tutorial, we will consistently work with unit vectors to represent projection axes. If $v$ is not a unit vector, we need to divide the value obtained by the formula above by the norm of $v$ in order to get the actual projected coordinate. We will see later that with PCA, our projection axes (principal components) will always be unit vectors. 
+
+Let's see what the projection onto $$v=\left(\frac{1}{\sqrt{2}}, \frac{1}{\sqrt{2}}\right)$$ looks like for the data above.
+
+```{r}
+## Define projection axis
+a <- b <- 1/sqrt(2)
+v <- rbind(a, b)
+
+## Project the measured values
+df0 <- c(as.matrix(df) %*% v)
+
+## Plot the original and projected values
+ggplot(df) + coord_fixed() + theme_bw() + 
+  geom_point(aes(x = x, y = y), size = 5, alpha = 0.25) + 
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") + 
+  geom_point(data = data.frame(x = df0 * a, y = df0 * b),
+             aes(x = x, y = y), shape = 1, color = "green3", size = 3.75, stroke = 1.25) + 
+  geom_segment(aes(x = 0, y = 0, xend = a, yend = a), 
+               arrow = arrow(length = unit(0.03, "npc")), size = 2, color = "red") + 
+  geom_segment(data = cbind(df, xend = df0 * a, yend = df0 * b)[c(35, 42), ],
+               aes(x = x, y = y, xend = xend, yend = yend), 
+               arrow = arrow(length = unit(0.03, "npc")), size = 1, color = "green3")
+```
+
+As we can see, each original (grey) point has been projected onto the new axis (the dashed line, also represented by the red arrow of unit length), and the new coordinate along that axis (the distance from the origin) is given by a linear combination of the original coordinates (the projection of two example points is indicated by green arrows). By doing this projection, we have essentially reduced our original 2-dimensional data set to a 1-dimensional one, but incorporating information from both the original $x$ and $y$ in the process. We can see that we are still losing some information (the difference between the grey and green points). The two example points with the green projection arrows are well separated in the original 2-dimensional space, but they are much closer on the 1-dimensional projection space. However, if we select the projection axis in a clever way, this loss is overall smaller than if we would simply select, e.g., the $x$-coordinate as the one-dimensional representation of our points. 
+
+We will see below that PCA performs precisely this type of projection (typically from a very high-dimensional space, but the principle is the same as in our two-dimensional example above), and the projection axis is chosen in such a way as to retain as much 'information' as possible from the original data set. 
+
+## The Frobenius norm
+
+Before going further, we define a way to calculate the 'size' of a matrix. The _Frobenius norm_ is a generalization of the Euclidean distance, and for an $N\times p$ matrix $M$ it's defined as $$\|M\|_F^2=\sum_{j=1}^p\sum_{i=1}^Nm_{ij}^2.$$In other words, the sum of the squared values of all matrix elements. We can use this to define a distance measure between two matrices of the same dimensions, as: $$d(M,W)=\|M-W\|_F.$$Let's define the two matrices as representing the original (grey) and projected (green) points in the plot above. Then, the squared Frobenius norm of the difference corresponds to the sum of the squared Euclidean distances from the original points to the projected points (the lengths of the green lines below). 
+
+```{r}
+ggplot(df) + coord_fixed() + theme_bw() + 
+  geom_point(aes(x = x, y = y), size = 5, alpha = 0.25) + 
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") + 
+  geom_point(data = data.frame(x = df0 * a, y = df0 * b),
+             aes(x = x, y = y), shape = 1, color = "green3", size = 3.75, stroke = 1.25) + 
+  geom_segment(data = cbind(df, xend = df0 * a, yend = df0 * b),
+               aes(x = x, y = y, xend = xend, yend = yend), 
+               size = 1, color = "green3")
+```
+
+## The singular value decomposition (SVD)
+
+Before showing how to perform a PCA on the `mtcars` data, we will look into the theoretical underpinnings a bit. First, we'll talk about the _singular value decomposition_ (_SVD_, sometimes also referred to as _compact SVD_, e.g. on [Wikipedia](https://en.wikipedia.org/wiki/Singular_value_decomposition)). This is an important mathematical result, which states that _every_ real-valued $N\times p$ matrix $M$ can be _decomposed_ as $$M=UDV^T,$$ where $U$ is an $N\times r$ orthogonal matrix (a matrix where each pair of columns are orthogonal, and the sum of the squared values in each column is equal to 1), $V$ is a $p\times r$ orthogonal matrix ($T$ represents the transpose of a matrix) and $D$ is a non-negative $r\times r$ diagonal matrix. Here, $r$ denotes the _rank_ of the matrix, which corresponds to the number of non-zero values in the diagonal of $D$. In fact, the decomposition exists also for complex-valued matrices, but we'll stay with the real-valued ones for this introduction. In this decomposition, the columns of $U$ and $V$ are called the left and right singular vectors, respectively, and the diagonal elements of $D$ are called the singular values. It is also worth noting that if all the singular values are unique, and we follow the convention of ordering them in decreasing order, the decomposition is uniquely determined (up to the sign of the singular vectors). 
+
+To see how this works in practice, let's apply it to the `mtcars` matrix above. In R, the singular value decomposition can be calculated using the `svd()` function. 
+
+```{r}
+svdres <- svd(as.matrix(mtcars))
+str(svdres)
+```
+
+We indeed get the expected three components ($U$, $V$, $D$) in the output. Let's first check that the $U$ and $V$ matrices are orthogonal. This can be done by calculating the dot product (scalar product) between each pair of columns. If the matrix is orthogonal, this product should be 1 if a column is multiplied with itself, and 0 otherwise. Practically, we can achieve this by performing a matrix multiplication between the transpose of the matrix and the matrix itself. The diagonal elements in the resulting matrix correspond to multiplication of a column by itself, and the off-diagonal elements correspond to multiplication of different columns. 
+
+```{r}
+round(t(svdres$u) %*% svdres$u, 3)
+```
+
+```{r}
+round(t(svdres$v) %*% svdres$v, 3)
+```
+
+Just as we expected! We also confirm that the values in $D$ are all non-negative and ordered in decreasing order of magnitude (note that since we know that $D$ is a diagonal matrix, only the diagonal values are given here - to turn it into a matrix we can use the `diag()` function):
+
+```{r}
+round(svdres$d, 1)
+```
+
+Finally, we have to confirm that we have actually decomposed our original matrix! In other words, performing the matrix multiplication $UDV^T$ should return our original matrix.
+
+```{r}
+mtcars_rec <- svdres$u %*% diag(svdres$d) %*% t(svdres$v)
+max(abs(mtcars_rec - mtcars))
+```
+
+Success! Note that due to rounding issues the number might be slightly different in your case - but still very very small.
+
+Now that we have seen that we can decompose our matrix using the SVD (I promise you, it will work for any other matrix as well), let's see how this is related to PCA. In fact, it is very straightforward: given a matrix $M$ with samples in the rows and variables in the columns, we define the _principal components_ by the columns of $V$. Relating back to what we saw in the beginning of this session, we can interpret each of these columns as a vector of _weights_, one for each variable, and we can create a linear combination of the original variables with precisely these weights. Recall that this would correspond to projecting the data onto a corresponding line in the original space. Also note that, as promised, each projection axis is a unit vector, since the $V$ matrix is orthogonal.
+
+We'll now see what is so special about the decomposition obtained by the SVD, which motivates its widespread use for dimensionality reduction. To do that, let's see what happens if we perform the projection of our original data matrix $M$ onto these components. As indicated above, this would be achieved by matrix multiplication of $M$ and $V$. Since $V$ is an orthogonal matrix, we get the projections as $$MV=UDV^TV=UD.$$ In other words, the projections of the original samples onto the new orthogonal basis defined by the principal components are given by the rows of $UD$.
+
+So, we have _decomposed_ $M$, using the SVD, into $$M=(UD)V^T,$$where $V$ contains the principal components and $UD$ contains the projections of each original point onto these principal components. But what is this all good for - remember that what we are after is to reduce the dimensionality of the data, while in some sense keeping as much information as possible. The answer lies in the _Eckart-Young_ theorem: 
+
+__Eckart-Young theorem__: Let M be a real $N\times p$ matrix with rank $r$, and let $s\leq r$. Then the _optimal_ rank-$s$ approximation to $M$ (minimizing the Frobenius norm of the difference) is given by $$M_s=U_sD_sV_s^T,$$ where $U_s$ and $V_s$ are matrices containing the first $s$ left and right singular vectors of $M$, respectively, and $D_s$ is a diagonal matrix containing the first $s$ singular values. The error in the approximation is given by $$\|M-M_s\|_F^2=\sum_{k=s+1}^rd_k^2.$$
+
+In other words, performing the SVD and keeping only the first $s$ columns of the respective singular matrices gives us the _best_ $s$-dimensional approximation of our original matrix, which was exactly what we were after! Note also that by choosing $s=r$, we get back our original matrix, as we saw previously. Furthermore, the singular values (elements of $D$) are a measure of how important each new dimension is for the reconstruction of the original $M$.
+
+Let's try what we just saw in practice. Given our `mtcars` matrix $M$, we approximate it with the first 6 singular vectors, and calculate the error. 
+
+```{r}
+## Get U, D, V via SVD
+mtcars_svd <- svd(as.matrix(mtcars))
+
+## Calculate M_s, with s=6
+mtcars_s6 <- mtcars_svd$u[, 1:6] %*% diag(mtcars_svd$d[1:6]) %*% t(mtcars_svd$v[, 1:6])
+dim(mtcars_s6) ## same as mtcars
+```
+
+```{r}
+## Calculate the Frobenius norm of the difference between the two matrices (M and M_s)
+sum((mtcars - mtcars_s6)^2)
+```
+
+```{r}
+## Compare it to the sum of the squared singular values for the components that are not included
+sum(mtcars_svd$d[7:11]^2)
+```
+
+As expected, the error in the approximation is exactly given by the sum of the squares of the non-included singular values!
+
+To recap, the SVD gives us a decomposition of the original matrix, which is such that if we select the first $s$ components from it, we get the best approximation of the original matrix of rank $s$, and where we can interpret $UD$ as the projection of the original matrix onto the orthogonal columns of $V$. Sounds pretty good! But it doesn't stop there. Let's make one more assumption, namely that the columns of our original matrix are centered (in other words, that the mean of each variable is 0). In that case, we can prove that the projection onto the first $s$ right singular vectors is also the rank-$s$ projection with maximal _variance_. In other words, if we consider variance a good measure of "information", the first $s$ principal components provides the most informative rank-$s$ projection of our data! We can easily get the variance explained by each component as the square of the corresponding singular value. 
+
+In fact, we can also prove that the projecting the data onto the first principal components is optimal in the sense of preserving distances, that is, minimizing $$\sum_{j,k=1}^n\delta_{jk}^2-\hat{\delta}_{jk}^2$$where $\delta_{jk}$ and $\hat{\delta}_{jk}$ are Euclidean distances between points $j$ and $k$ in the original and low-dimensional space, respectively. 
+
+Note that, just as for the two-dimensional example above, the rank-$s$ approximation of $M$ obtained by the first $s$ components from the SVD still lies in the same space as the original data set. In this form, the SVD can be used for denoising of a data set, by representing it with an approximate version, which has less 'degrees of freedom' but still provides a close approximation of the original data set. To achieve the dimensionality reduction that we are after here, instead, we will represent our approximate values in a new space, defined by the principal components (the new basis vectors). This space is of lower dimensionality than the original space (in fact, the dimensionality is equal to the number of retained singular vectors), and we can use it e.g. for plotting of the coordinates in the new space.
+
+# Running PCA in R
+
+Hopefully the derivations above have convinced you that projecting data onto the first principal components can be a sensible way of reducing the dimensionality while retaining as much as possible of the 'information' (=variance) in the original data, or, alternatively, to approximate the original data as well as possible in a lower-dimensional space. Now, we will see how to run the PCA in R. We can of course do it with the `svd()` function as described above, but R has also other functions that perform a bit more of the legwork for us. The one we are going to use here is `prcomp()`, which is provided in base R. Internally, it makes use of the SVD, which can be efficiently and robustly computed. This makes it numerically preferable to the `princomp()` function (also in base R), which uses an eigendecomposition to find the principal components. 
+
+__Important!__ When applying `prcomp()` to your data, make sure that you have the __samples in the rows__, and the variables in the columns! This is counter to most of the omics data, but keep in mind that `prcomp()` was written before omics data, during the time when data sets typically had more samples than variables, in which case this was the typical way of representing the data matrix. 
+
+The most important argument of `prcomp()` is the data matrix itself. In addition, we can specify whether the variables should be centered (`center` argument) and/or scaled (`scale.` argument) before the SVD is performed. We almost always want to set `center=TRUE`, which is the default in `prcomp()`; note that if we don't center the variables we can no longer interpret the square of the singular values as variances (they will merely be sums of squares). We will discuss the `scale.` argument a bit later - whether you want to scale your variables or not can depend strongly on your data and can have a non-negligible impact on the results. 
+
+Let's start by performing PCA on the `mtcars` data, without scaling the variables:
+
+```{r}
+pca <- prcomp(mtcars, scale. = FALSE)
+```
+
+The `pca` object contains all the output we need:
+* `x` - the sample coordinates on each of the principal components
+* `rotation` - the variable contributions (weights, loadings) to each of the principal components
+* `sdev` - the singular values, that is, the square roots of the variances of the respective components
+* `center`, `scale` - the values used to center and/or scale the variables before the SVD
+
+```{r}
+str(pca)
+```
+
+Before interpreting the results further, let's make sure that we get the same results as if we had applied the SVD directly.
+
+```{r}
+## Center the data set
+mtcars_centered <- scale(mtcars, center = TRUE, scale = FALSE)
+
+## Apply SVD
+mtcars_svd <- svd(mtcars_centered)
+
+## Compare V to rotation
+max(abs(mtcars_svd$v) - abs(pca$rotation))
+head(mtcars_svd$v)
+head(pca$rotation)
+```
+
+```{r}
+## Compare UD to x
+max(abs(mtcars_svd$u %*% diag(mtcars_svd$d)) - abs(pca$x))
+head(mtcars_svd$u %*% diag(mtcars_svd$d))
+head(pca$x)
+```
+
+```{r}
+## Compare D to sdev
+mtcars_svd$d  ## these are not actual standard deviation, but a constant multiple of them
+mtcars_svd$d/sqrt(32 - 1)
+pca$sdev
+mtcars_svd$d^2/pca$sdev^2
+```
+
+Hopefully it is clear from these comparisons how SVD is used to power PCA, and how using the `prcomp()` function rather than the `svd()` function directly can help us take care of some of the book-keeping. 
+
+The `prcomp()` output also has a helpful `summary()` function, that tabulates the standard deviation of each component, and the corresponding fraction of the total variance in the data set.
+
+```{r}
+summary(pca)
+```
+
+We note that the first principal component represents almost _all_ the variance in the data (92.7%), and the second one adds a bit more. Components 3-11 contain almost no 'information', which indicates that seen like this, the data set is essentially two-dimensional. It is common to visualize the relative variance encoded by each component with a so called 'scree plot':
+
+```{r}
+plot(pca)
+```
+
+Again, we see that the first two components represent more or less all the variance in this data set. Depending on why the PCA was performed, scree plots can be used to 
+* determine how many principal components to retain (useful e.g. if PCA is used for preprocessing the data in order to generate a smaller number of uncorrelated features to use for input into other analysis methods such a linear regression or classification models)
+* determine what fraction of the variance is determined by the first few components (useful if PCA is used for visualization, in which case the number of components is limited by practical limits but we still want to know how well we are approximating the original data)
+
+To see how these components can be interpreted, let's first look at the sample representation. Here, we display the sample coordinates ($UD$, which we saw corresponds to `pca$x`) for the first two components, and color the points by the value of the `disp` variable:
+
+```{r}
+options(repr.plot.width = 12, repr.plot.height = 6) # default is 7, 7
+ggplot(cbind(data.frame(pca$x) %>% tibble::rownames_to_column("model"), mtcars), 
+       aes(x = PC1, y = PC2, color = disp, label = model)) + 
+  geom_point(size = 5) + 
+  theme_bw() + 
+  geom_text_repel() + coord_fixed()
+```
+
+Let's also look at the contributions from each of the variables to each of the principal components (i.e., $V$). We can do this either by printing out the `rotation` matrix, or by plotting the contributions to the first two components. Note that by construction (remember that $V$ is an orthogonal matrix), the sum of the squares of the weights in each component is always equal to 1.
+
+```{r}
+round(pca$rotation, 3)
+
+## Visualize as a heatmap
+options(repr.plot.width = 8, repr.plot.height = 7) # default is 7, 7
+dn <- dimnames(pca$rotation)
+df1 <- cbind(expand.grid(variable = factor(dn[[1]], levels = rev(dn[[1]])),
+                         PC = factor(dn[[2]], levels = dn[[2]])),
+             rotation = as.vector(pca$rotation))
+mx <- max(abs(pca$rotation))
+ggplot(df1, aes(x = PC, y = variable, fill = rotation)) +
+  scale_fill_distiller(type = "div", palette = "RdBu", direction = 1, 
+                       limits = c(-mx, mx)) +
+  geom_tile() + theme_bw(16)
+```
+
+```{r}
+options(repr.plot.width = 7, repr.plot.height = 7) # default is 7, 7
+ggplot(data.frame(pca$rotation) %>% tibble::rownames_to_column("feature")) + 
+  geom_segment(aes(xend = PC1, yend = PC2, x = 0, y = 0),
+               arrow = arrow(length = unit(0.03, "npc"))) + 
+  theme_bw() + 
+  geom_text_repel(aes(x = PC1, y = PC2, label = feature))
+```
+
+From this plot we note that two variables (`disp` and `hp`) have _much_ higher contributions to the first and second principal components than the other variables do. Essentially, the value of these variables alone determine the coordinate of each sample on these components. Why is that? Let's look at the variances of the original variables:
+
+```{r}
+round(apply(mtcars, 2, var), 1)
+```
+
+The `disp` and `hp` variables have way higher variances than the other variables. Why is this important? Recall that we are essentially trying to distribute the weights between the variables (while keeping the sum of squared weights equal to 1) in such a way that the resulting weighted sum has maximal variance. Thus, if one variable has much higher variance than all others, the maximal variance of the linear combination is obtained by giving all the weight to that variable! In some situations, this may be desirable (e.g., when the high variance of a variable actually means that it is more important for us). One example where this is the case would be if the variables are all similar (e.g. blood pressure measurements at different time points) and thus directly numerically comparable.
+
+However, in the current case, the reason for the high variance of `disp` and `hp` is rather that they are measured in different units than the other variables, not that they are more important (as a comparison, height doesn't become more important just because you measure it in centimeters instead of in meters, but the variance invariably increases by a factor of 10,000). This is where the scaling comes in (the `scale.` argument of `prcomp`). If we set this to `TRUE`, all variables will be scaled to have the same variance before the SVD is applied, and thus the original variance will have no influence anymore. Instead, the _correlation_ among variables will become important. We can increase the variance of a linear combination by assigning higher weights to highly correlated variables. Let's see what happens if we instead run the PCA on the scaled data:
+
+```{r}
+pcasc <- prcomp(mtcars, scale. = TRUE)
+summary(pcasc)
+plot(pcasc)
+```
+
+Now, while still a large fraction of the variance is explained by the first two components, it is nowhere near as dominant as before. 
+
+```{r}
+options(repr.plot.width = 12, repr.plot.height = 6) # default is 7, 7
+ggplot(cbind(data.frame(pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
+       aes(x = PC1, y = PC2, color = disp, label = model)) + 
+  geom_point(size = 5) + 
+  theme_bw() + 
+  geom_text_repel() + coord_fixed()
+```
+
+Now, many more variables contribute to the first principal components:
+
+```{r}
+options(repr.plot.width = 8, repr.plot.height = 7) # default is 7, 7
+dn <- dimnames(pcasc$rotation)
+df2 <- cbind(expand.grid(variable = factor(dn[[1]], levels = rev(dn[[1]])),
+                         PC = factor(dn[[2]], levels = dn[[2]])),
+             rotation = as.vector(pcasc$rotation))
+mx <- max(abs(pcasc$rotation))
+ggplot(df2, aes(x = PC, y = variable, fill = rotation)) +
+  scale_fill_distiller(type = "div", palette = "RdBu", direction = 1, 
+                       limits = c(-mx, mx)) +
+  geom_tile() + theme_bw(16)
+```
+
+```{r}
+options(repr.plot.width = 7, repr.plot.height = 7) # default is 7, 7
+ggplot(data.frame(pcasc$rotation) %>% tibble::rownames_to_column("feature")) + 
+  geom_segment(aes(xend = PC1, yend = PC2, x = 0, y = 0),
+               arrow = arrow(length = unit(0.03, "npc"))) + 
+  theme_bw() + 
+  geom_text_repel(aes(x = PC1, y = PC2, label = feature))
+```
+
+Interestingly, we see two 'groups' of variables, defined by whether they have a positive or a negative contribution to the first principal component. Let's compare this division to the correlogram we made earlier:
+
+```{r}
+options(repr.plot.width = 7, repr.plot.height = 7) # default is 7, 7
+ggcorrplot(round(cor(mtcars),3), 
+           hc.order = TRUE, 
+           lab = TRUE, 
+           lab_size = 3, 
+           method = "circle", 
+           colors = c("tomato2", "white", "blue"), 
+           title = "Correlations among variables", 
+           ggtheme = theme_bw)
+```
+
+Pretty similar patterns emerge! The five variables with a positive contribution to PC1 (`disp`, `cyl`, `hp`, `wt`, `carb`) are also highly positively correlated with each other, and the same is true for the variables with a negative contribution to PC1. This is typical, and in fact one reason why PCA works so well for dimensionality reduction - highly correlated variables, which don't really add much independent information, are 'clumped together' in the sense that they give similar contributions to the principal components. Thus, instead of considering each of the highly correlated variables independently, we are effectively reducing them to their average. 
+
+What else can we see from these plot? Let's consider the variable with the highest positive weight on PC1 (`cyl`). The fact that it has a high weight in the linear combination that is PC1 means that the sample coordinates on PC1 will be strongly impacted by their value of `cyl`. As a consequence, we would expect the value of `cyl` to be strongly associated with the position of the samples along PC1. Let's color the points by `cyl` to see whether this is correct: 
+
+```{r}
+ggplot(cbind(data.frame(pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
+       aes(x = PC1, y = PC2, color = cyl, label = model)) + 
+  geom_point(size = 5) + 
+  theme_bw() + 
+  geom_text_repel() + coord_fixed()
+```
+
+Indeed it is! Moreover, the value of `cyl` is high in the samples with a positive coordinate on PC1. Let's similarly look at the variable with the largest _negative_ weight on PC1 (`mpg`). This similarly indicates that it has a strong impact on the sample coordinate on this component, but the effect is oppositely directed compared to `cyl`. Let's color the samples by the value of `mpg`:
+
+```{r}
+ggplot(cbind(data.frame(pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
+       aes(x = PC1, y = PC2, color = mpg, label = model)) + 
+  geom_point(size = 5) + 
+  theme_bw() + 
+  geom_text_repel() + coord_fixed()
+```
+
+This association between the weights of the variables in the principal components and their values in the samples with large (positive or negative) coordinates in the corresponding components is important, and can be very helpful for interpreting PCA plots. The take-home message from this is: don't just look at the sample plot!
+
+Above we looked at the contributions to the first principal component, but we can of course also look at any other component. For example, let's color the samples by the value of the variable with the largest negative contribution to PC2 (`qsec`): 
+
+```{r}
+ggplot(cbind(data.frame(pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
+       aes(x = PC1, y = PC2, color = qsec, label = model)) + 
+  geom_point(size = 5) + 
+  theme_bw() + 
+  geom_text_repel() + coord_fixed()
+```
+
+Or let's consider a direction which is not parallel to one of the actual components - e.g., pointing towards the top-left corner of the plot (the `am` or `gear` variables). Samples located in the same direction tend to have a high value of that variable, and samples located in the opposite direction from the origin tend to have a low value.
+
+```{r}
+ggplot(cbind(data.frame(pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
+       aes(x = PC1, y = PC2, color = am, label = model)) + 
+  geom_point(size = 5) + 
+  theme_bw() + 
+  geom_text_repel() + coord_fixed()
+```
+
+```{r}
+ggplot(cbind(data.frame(pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
+       aes(x = PC1, y = PC2, color = gear, label = model)) + 
+  geom_point(size = 5) + 
+  theme_bw() + 
+  geom_text_repel() + coord_fixed()
+```
+
+# Final thoughts
+
+* The sign of the principal components is arbitrary - the variance of $X$ is the same as the variance of $-X$. Thus, equivalent plots may look different just because one or the other of the axes have been flipped.
+* You may have heard that the principal components are eigenvectors of the covariance matrix - how does that go along with the SVD that we have shown here? Recall that $$M=UDV^T.$$We're assuming that the columns of $M$ are centered, which means that, up to a constant, the covariance matrix of $M$ is equal to $$M^TM=(VDU^T)(UDV^T)=VD^2V^T$$(since $U$ is orthogonal). Multiplying from the right with e.g. the first column of $V$ gives $$M^TMv_1=VD^2V^Tv_1=d_1^2v_1,$$which shows that the columns of $V$ are eigenvectors of the covariance matrix of $M$, and the squared singular values are the corresponding eigenvalues. Similarly, the columns of $U$ are eigenvectors of $MM^T$.
+* When performing PCA, it's good practice to record the fraction of the variance explained by each principal component. Also keep in mind that the 'expected' fraction depends on the size of the data set! With only two variables, the first two principal components will _always_ contain 100% of the variance. Similarly, if you have only three samples, in any dimension, and each variable is mean-centered, the three points will always lie in at most a 2-dimensional plane. The more variables and samples the data set contain, the less variance is expected to be contained in the first few principal components. See e.g. [this paper](https://bmcbioinformatics.biomedcentral.com/articles/10.1186/1471-2105-12-307) for a principled approach to estimating whether the obtained subspace contains more variance than 'expected' in random data. 
+
+# Shortcomings of PCA
+
+* While PCA is widely used and often very useful, it does rely on the assumption that it makes sense to attempt to reproduce Euclidean distances, and that variance is a meaningful measure of 'information content'. If this is not the case, another method may be more suitable.
+* Similarly, PCA will only allow the mapping from the high-dimensional to the low-dimensional space to be a linear projection. Nonlinear mappings are not considered. Similarly, it assumes that the data lies on a linear subspace of some dimension. There are nonlinear generalizations of PCA (kernel PCA), and of course many other dimensionality reduction techniques attempting to find nonlinear structure. 
+* PCA assigns a weight to each feature, which can sometimes be difficult to interpret. Sparse variants have been developed (L1 penalty - only one among a set of correlated features will have a non-zero weight). 
+* PCA is unsupervised, which is often a strength, but sometimes a shortcoming. If the goal is to find a projection that represents some external variable (e.g. a categorization of samples), there are other more suitable techniques, e.g., linear discriminant analysis (LDA) or partial least squares-discriminant analysis (PLS-DA).
+
+# TODO
+
+* approximate PCA, irlba, rsvd etc
+* Mention other linear techniques (LDA, PLS, CCA)
+* Explicitly calculate variance/covariance between the PCs -> not only orthogonal, but also uncorrelated
+* Mention interactive apps like explor, pcaExplorer?
+
+# Session info
+
+```{r}
+sessionInfo()
+```
+
