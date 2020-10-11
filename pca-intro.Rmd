@@ -84,6 +84,20 @@ A data frame with 32 observations on 11 (numeric) variables.
    [,11]  carb  Number of carburetors
 ```
 
+For reasons that will be clear later in this session, let us assume that these 
+measurements were obtained at two different occasions - in the first round, we 
+collect information about 25 cars, and in the second, we collect information 
+about the remaining 7. We split the `mtcars` data frame accordingly, and for 
+now consider only the measurements from the first round (for simplicity, 
+we'll call this part `mtcars`, and the second part `mtcars_round2`).
+
+```{r}
+set.seed(42)
+(idx <- sample(x = seq_len(nrow(mtcars)), size = 7))
+mtcars_round2 <- mtcars[idx, ]
+mtcars <- mtcars[-idx, ]
+```
+
 For later reference, we'll also plot the correlations among the variables.
 
 ```{r}
@@ -331,8 +345,8 @@ above. In R, the singular value decomposition can be calculated using the
 `svd()` function.
 
 ```{r}
-svdres <- svd(as.matrix(mtcars))
-str(svdres)
+mtcars_svd <- svd(as.matrix(mtcars))
+str(mtcars_svd)
 ```
 
 We indeed get the expected three components ($U$, $V$, $D$) in the output. Let's
@@ -346,11 +360,11 @@ column by itself, and the off-diagonal elements correspond to multiplication of
 different columns.
 
 ```{r}
-round(t(svdres$u) %*% svdres$u, 3)
+round(t(mtcars_svd$u) %*% mtcars_svd$u, 3)
 ```
 
 ```{r}
-round(t(svdres$v) %*% svdres$v, 3)
+round(t(mtcars_svd$v) %*% mtcars_svd$v, 3)
 ```
 
 Just as we expected! We also confirm that the values in $D$ are all non-negative
@@ -359,7 +373,7 @@ is a diagonal matrix, only the diagonal values are given here - to turn it into
 a matrix we can use the `diag()` function):
 
 ```{r}
-round(svdres$d, 1)
+round(mtcars_svd$d, 1)
 ```
 
 Finally, we have to confirm that we have actually decomposed our original
@@ -367,7 +381,7 @@ matrix! In other words, performing the matrix multiplication $UDV^T$ should
 return our original matrix.
 
 ```{r}
-mtcars_rec <- svdres$u %*% diag(svdres$d) %*% t(svdres$v)
+mtcars_rec <- mtcars_svd$u %*% diag(mtcars_svd$d) %*% t(mtcars_svd$v)
 max(abs(mtcars_rec - mtcars))
 ```
 
@@ -395,7 +409,11 @@ $M$ onto these components. As indicated above, this would be achieved by matrix
 multiplication of $M$ and $V$. Since $V$ is an orthogonal matrix, we get the
 projections as $$MV=UDV^TV=UD.$$ In other words, the projections of the original
 samples onto the new orthogonal basis defined by the principal components are
-given by the rows of $UD$.
+given by the rows of $UD$. Importantly, once we have identified the basis for 
+the projection ($V$), we can project also _new_ samples onto the same basis. 
+Hence, once we have extracted the principal components from one data set, we 
+can project any new samples (for which we have measured the same set of 
+variables) onto the same space.
 
 So, we have _decomposed_ $M$, using the SVD, into $$M=(UD)V^T,$$where $V$
 contains the principal components and $UD$ contains the projections of each
@@ -423,7 +441,7 @@ Let's try what we just saw in practice. Given our `mtcars` matrix $M$, we
 approximate it with the first 6 singular vectors, and calculate the error.
 
 ```{r}
-## Get U, D, V via SVD
+## Get U, D, V via SVD, as above
 mtcars_svd <- svd(as.matrix(mtcars))
 
 ## Calculate M_s, with s=6
@@ -516,10 +534,10 @@ Let's start by performing PCA on the `mtcars` data, without scaling the
 variables:
 
 ```{r}
-pca <- prcomp(mtcars, center = TRUE, scale. = FALSE)
+mtcars_pca <- prcomp(mtcars, center = TRUE, scale. = FALSE)
 ```
 
-The `pca` object contains all the output we need:
+The `mtcars_pca` object contains all the output we need:
 
 * `x` - the sample coordinates on each of the principal components
 * `rotation` - the variable contributions (weights, loadings) to each of the
@@ -530,7 +548,7 @@ the respective components
 before the SVD
 
 ```{r}
-str(pca)
+str(mtcars_pca)
 ```
 
 ## Comparing to the output of `svd()`
@@ -546,23 +564,23 @@ mtcars_centered <- scale(mtcars, center = TRUE, scale = FALSE)
 mtcars_svd <- svd(mtcars_centered)
 
 ## Compare V to rotation
-max(abs(mtcars_svd$v) - abs(pca$rotation))
+max(abs(mtcars_svd$v) - abs(mtcars_pca$rotation))
 mtcars_svd$v[1:3, 1:3]
-pca$rotation[1:3, 1:3]
+mtcars_pca$rotation[1:3, 1:3]
 ```
 
 ```{r}
 ## Compare UD to x
-max(abs(mtcars_svd$u %*% diag(mtcars_svd$d)) - abs(pca$x))
+max(abs(mtcars_svd$u %*% diag(mtcars_svd$d)) - abs(mtcars_pca$x))
 (mtcars_svd$u %*% diag(mtcars_svd$d))[1:3, 1:3]
-pca$x[1:3, 1:3]
+mtcars_pca$x[1:3, 1:3]
 ```
 
 ```{r}
 ## Compare D to sdev
 mtcars_svd$d  ## these are not actual standard deviation, but a constant multiple of them
-mtcars_svd$d/sqrt(32 - 1)
-pca$sdev
+mtcars_svd$d/sqrt(nrow(mtcars_svd$u) - 1)
+mtcars_pca$sdev
 ```
 
 Hopefully it is clear from these comparisons how SVD is used to power PCA, and
@@ -576,7 +594,7 @@ the standard deviation of each component, and the corresponding fraction of the
 total variance in the data set.
 
 ```{r}
-summary(pca)
+summary(mtcars_pca)
 ```
 
 We note that the first principal component represents almost _all_ the variance
@@ -586,7 +604,7 @@ essentially two-dimensional. It is common to visualize the relative variance
 encoded by each component with a so called 'scree plot':
 
 ```{r}
-plot(pca)
+plot(mtcars_pca)
 ```
 
 Again, we see that the first two components represent more or less all the
@@ -606,11 +624,11 @@ are approximating the original data)
 
 To see how these components can be interpreted, let's first look at the sample
 representation. Here, we display the sample coordinates ($UD$, which we saw
-corresponds to `pca$x`) for the first two components, and color the points by
+corresponds to `mtcars_pca$x`) for the first two components, and color the points by
 the value of the `disp` variable:
 
 ```{r}
-ggplot(cbind(data.frame(pca$x) %>% tibble::rownames_to_column("model"), mtcars), 
+ggplot(cbind(data.frame(mtcars_pca$x) %>% tibble::rownames_to_column("model"), mtcars), 
        aes(x = PC1, y = PC2, color = disp, label = model)) + 
   geom_point(size = 5) + 
   theme_bw() + geom_text_repel() + coord_fixed()
@@ -625,14 +643,14 @@ Note that by construction (remember that $V$ is an orthogonal matrix), the sum
 of the squares of the weights in each component is always equal to 1.
 
 ```{r}
-round(pca$rotation, 3)
+round(mtcars_pca$rotation, 3)
 
 ## Visualize as a heatmap
-dn <- dimnames(pca$rotation)
+dn <- dimnames(mtcars_pca$rotation)
 df1 <- cbind(expand.grid(variable = factor(dn[[1]], levels = rev(dn[[1]])),
                          PC = factor(dn[[2]], levels = dn[[2]])),
-             rotation = as.vector(pca$rotation))
-mx <- max(abs(pca$rotation))
+             rotation = as.vector(mtcars_pca$rotation))
+mx <- max(abs(mtcars_pca$rotation))
 ggplot(df1, aes(x = PC, y = variable, fill = rotation)) +
   scale_fill_distiller(type = "div", palette = "RdBu", direction = 1, 
                        limits = c(-mx, mx)) +
@@ -640,7 +658,7 @@ ggplot(df1, aes(x = PC, y = variable, fill = rotation)) +
 ```
 
 ```{r}
-ggplot(data.frame(pca$rotation) %>% tibble::rownames_to_column("feature")) + 
+ggplot(data.frame(mtcars_pca$rotation) %>% tibble::rownames_to_column("feature")) + 
   geom_segment(aes(xend = PC1, yend = PC2, x = 0, y = 0),
                arrow = arrow(length = unit(0.03, "npc"))) + 
   theme_bw() + 
@@ -686,16 +704,16 @@ highly correlated variables.
 Let's see what happens if we instead run the PCA on scaled data:
 
 ```{r}
-pcasc <- prcomp(mtcars, scale. = TRUE)
-summary(pcasc)
-plot(pcasc)
+mtcars_pcasc <- prcomp(mtcars, scale. = TRUE)
+summary(mtcars_pcasc)
+plot(mtcars_pcasc)
 ```
 
 Now, while still a large fraction of the variance is explained by the first two
-components, it is nowhere near as dominant as before.
+components, they are nowhere near as dominant as before.
 
 ```{r}
-ggplot(cbind(data.frame(pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
+ggplot(cbind(data.frame(mtcars_pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
        aes(x = PC1, y = PC2, color = disp, label = model)) + 
   geom_point(size = 5) + 
   theme_bw() + geom_text_repel() + coord_fixed()
@@ -704,11 +722,11 @@ ggplot(cbind(data.frame(pcasc$x) %>% tibble::rownames_to_column("model"), mtcars
 Now, many more variables contribute to the first principal components:
 
 ```{r}
-dn <- dimnames(pcasc$rotation)
+dn <- dimnames(mtcars_pcasc$rotation)
 df2 <- cbind(expand.grid(variable = factor(dn[[1]], levels = rev(dn[[1]])),
                          PC = factor(dn[[2]], levels = dn[[2]])),
-             rotation = as.vector(pcasc$rotation))
-mx <- max(abs(pcasc$rotation))
+             rotation = as.vector(mtcars_pcasc$rotation))
+mx <- max(abs(mtcars_pcasc$rotation))
 ggplot(df2, aes(x = PC, y = variable, fill = rotation)) +
   scale_fill_distiller(type = "div", palette = "RdBu", direction = 1, 
                        limits = c(-mx, mx)) +
@@ -716,7 +734,7 @@ ggplot(df2, aes(x = PC, y = variable, fill = rotation)) +
 ```
 
 ```{r}
-ggplot(data.frame(pcasc$rotation) %>% tibble::rownames_to_column("feature")) + 
+ggplot(data.frame(mtcars_pcasc$rotation) %>% tibble::rownames_to_column("feature")) + 
   geom_segment(aes(xend = PC1, yend = PC2, x = 0, y = 0),
                arrow = arrow(length = unit(0.03, "npc"))) + 
   theme_bw() + 
@@ -756,7 +774,7 @@ the value of `cyl` to be strongly associated with the position of the samples
 along PC1. Let's color the points by `cyl` to see whether this is correct:
 
 ```{r}
-ggplot(cbind(data.frame(pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
+ggplot(cbind(data.frame(mtcars_pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
        aes(x = PC1, y = PC2, color = cyl, label = model)) + 
   geom_point(size = 5) + 
   theme_bw() + geom_text_repel() + coord_fixed()
@@ -770,7 +788,7 @@ oppositely directed compared to `cyl`. Let's color the samples by the value of
 `mpg`:
 
 ```{r}
-ggplot(cbind(data.frame(pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
+ggplot(cbind(data.frame(mtcars_pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
        aes(x = PC1, y = PC2, color = mpg, label = model)) + 
   geom_point(size = 5) + 
   theme_bw() + geom_text_repel() + coord_fixed()
@@ -790,7 +808,7 @@ samples by the value of the variable with the largest negative contribution to
 PC2 (`qsec`):
 
 ```{r}
-ggplot(cbind(data.frame(pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
+ggplot(cbind(data.frame(mtcars_pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
        aes(x = PC1, y = PC2, color = qsec, label = model)) + 
   geom_point(size = 5) + 
   theme_bw() + geom_text_repel() + coord_fixed()
@@ -803,18 +821,97 @@ value of that variable, and samples located in the opposite direction from the
 origin tend to have a low value.
 
 ```{r}
-ggplot(cbind(data.frame(pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
+ggplot(cbind(data.frame(mtcars_pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
        aes(x = PC1, y = PC2, color = am, label = model)) + 
   geom_point(size = 5) + 
   theme_bw() + geom_text_repel() + coord_fixed()
 ```
 
 ```{r}
-ggplot(cbind(data.frame(pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
+ggplot(cbind(data.frame(mtcars_pcasc$x) %>% tibble::rownames_to_column("model"), mtcars), 
        aes(x = PC1, y = PC2, color = gear, label = model)) + 
   geom_point(size = 5) + 
   theme_bw() + geom_text_repel() + coord_fixed()
 ```
+
+## Projecting new points onto principal components
+
+Let's finally come back to the 'second round' of measurements that we split out 
+in the very beginning of this document. In this type of situations, we often 
+have two choices: either we create a new, merged data set and redo the PCA (in 
+which case the new samples are also allowed to impact the principal components), 
+or we project the new samples onto the basis defined by the original data set. 
+To achieve the second, we can use the `predict()` function (which is a generic 
+R function, with an implementation for `prcomp` objects). We need to provide the 
+PCA object as well as the new data. 
+
+```{r}
+mtcars_round2
+mtcars_round2_proj <- predict(mtcars_pcasc, newdata = mtcars_round2)
+class(mtcars_round2_proj)
+```
+
+Let's plot these new observations in the principal component space. 
+
+```{r}
+mtcars_pcasc_all <- rbind(
+  cbind(data.frame(mtcars_pcasc$x) %>% tibble::rownames_to_column("model"), mtcars) %>%
+    dplyr::mutate(type = "original"),
+  cbind(data.frame(mtcars_round2_proj) %>% tibble::rownames_to_column("model"), mtcars_round2) %>%
+    dplyr::mutate(type = "new"))
+ggplot(mtcars_pcasc_all,
+       aes(x = PC1, y = PC2, color = type, label = model)) + 
+  geom_point(size = 5) + 
+  theme_bw() + geom_text_repel() + coord_fixed()
+```
+
+We can also color the observations by a couple of the observed variables, to 
+make sure that the new observations indeed are placed close to similar 
+observations from the original set. 
+
+```{r}
+ggplot(mtcars_pcasc_all,
+       aes(x = PC1, y = PC2, color = cyl, label = model)) + 
+  geom_point(size = 5) + 
+  theme_bw() + geom_text_repel() + coord_fixed()
+ggplot(mtcars_pcasc_all,
+       aes(x = PC1, y = PC2, color = qsec, label = model)) + 
+  geom_point(size = 5) + 
+  theme_bw() + geom_text_repel() + coord_fixed()
+```
+
+Let's see if we can break down what happened here. As we saw earlier, what 
+we are attempting to do is to project the new data onto the principal 
+components defined by the original observations. Remember that before the  
+`prcomp()` function performed the SVD, we asked it to mean-center and 
+standardize the variables. Thus, we must apply the same standardization to 
+the new samples. Importantly, we must standardize using the mean and 
+standard deviation from the original data set (not from the new round). 
+These are stored in the `mtcars_pcasc` object:
+
+```{r}
+mtcars_pcasc$center
+mtcars_pcasc$scale
+mtcars_round2_scaled <- scale(mtcars_round2, center = mtcars_pcasc$center,
+                              scale = mtcars_pcasc$scale)
+```
+
+Next, we can project onto the extracted principal components (which are 
+stored in the `rotation` slot of `mtcars_pcasc`):
+
+```{r}
+mtcars_round2_proj_manual <- mtcars_round2_scaled  %*% mtcars_pcasc$rotation
+```
+
+This gives us exactly the same result as we got from the `predict()` function 
+above.
+
+```{r}
+mtcars_round2_proj_manual[, 1:3]
+mtcars_round2_proj[, 1:3]
+max(abs(mtcars_round2_proj_manual - mtcars_round2_proj))
+```
+
 
 # Other bits and pieces
 
