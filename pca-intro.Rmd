@@ -138,6 +138,10 @@ reduction in a clever way, we can minimize this information loss. Moreover, in
 many cases it's actually desirable to reduce the data set to the strongest
 signals only - consider it a kind of noise reduction.
 
+:::question
+**Question**: What is the dimensionality of the `mtcars` data set?
+::::
+
 There are many ways of doing dimensionality reduction - for example, we can
 select the first two variables from our data set, which immediately reduces the
 dimensionality to 2! However, we'll likely miss a lot of information (in
@@ -293,6 +297,10 @@ We will see below that PCA performs precisely this type of projection (typically
 from a very high-dimensional space, but the principle is the same as in our
 two-dimensional example above), and the projection axis is chosen in such a way
 as to retain as much 'information' as possible from the original data set.
+
+:::question
+**Question**: What are the obtained coordinates when projecting the points (1,2), (2,1), and (0,1) onto the direction (0.8,0.6)? 
+::::
 
 # The Frobenius norm
 
@@ -518,6 +526,10 @@ matrix. Other PCA implementations may, however, require the data matrix to be
 given with samples in the columns, so read the documentation carefully!
 ::::
 
+:::question
+**Question**: What do you think would happen if you run `prcomp()` on a matrix with samples in the columns instead of samples in the rows? Would R give you a warning, or will you get results back? If so, how would you interpret them? 
+::::
+
 The most important argument of `prcomp()` is the data matrix itself. In
 addition, we can specify whether the variables should be centered (`center`
 argument) and/or scaled (`scale.` argument) before the SVD is performed. We
@@ -633,6 +645,10 @@ ggplot(cbind(data.frame(mtcars_pca$x) %>% tibble::rownames_to_column("model"), m
   geom_point(size = 5) + 
   theme_bw() + geom_text_repel() + coord_fixed()
 ```
+
+:::question
+**Question**: Is it a coincidence that the samples seem to be centered around the origin in the PCA plot? Does the same have to be true for the variable plot?
+::::
 
 ## Interpreting the variable contributions
 
@@ -912,6 +928,9 @@ mtcars_round2_proj[, 1:3]
 max(abs(mtcars_round2_proj_manual - mtcars_round2_proj))
 ```
 
+:::question
+**Question**: Why do we center and scale using the mean and standard deviation from the original data when we project new points on the PCs? What could be potential problems with this? 
+::::
 
 # Other bits and pieces
 
