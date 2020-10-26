@@ -15,8 +15,9 @@ editor_options:
   chunk_output_type: console
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include = FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+options(width = 85)
 ```
 
 Principal Component Analysis (PCA) is a dimension reduction technique that was
@@ -179,12 +180,21 @@ of $x$ and $y$.
 Calculating such a linear combination can be related to projecting the points
 above onto a line through the origin in the two-dimensional space. For example,
 let's choose the line to be the x-axis. We define a vector of unit length,
-pointing in the direction of the x-axis, as  (1,0) . Projecting any point
+pointing in the direction of the x-axis, as $(1,0)$. 
+
+```{r}
+ggplot(df) + coord_fixed() + 
+  geom_point(aes(x = x, y = y), size = 5, alpha = 0.25) + theme_bw() + 
+  geom_segment(aes(x = 0, y = 0, xend = 1, yend = 0), 
+               arrow = arrow(length = unit(0.03, "npc")), size = 2, color = "red")
+```
+
+Projecting any point
 $(x_i,y_i)$ onto this axis now amounts to calculating the dot product between
-(1,0) and $(x_i,y_i)$, that is, $$1\cdot x_i + 0\cdot y_i = x_i.$$
+$(1,0)$ and $(x_i,y_i)$, that is, $$(1,0)\cdot(x_i,y_i) = 1\cdot x_i + 0\cdot y_i = x_i.$$
  
 The interpretation of this is that along the axis defined by the direction
-(1,0), the coordinate of the point $(x_i,y_i)$ (that is, the distance from the origin)
+$(1,0)$, the coordinate of the point $(x_i,y_i)$ (that is, the distance from the origin)
 is equal to $x_i$. This makes sense, since here we project onto the x-axis, and
 the coordinate of each point is indeed the x-coordinate of that point. We
 visualize the projection of one point below:
@@ -240,7 +250,7 @@ $$\frac{1}{\sqrt{2}}\cdot x_i + \frac{1}{\sqrt{2}}\cdot y_i.$$Denoting the
 $N\times 2$ matrix with original $x$- and $y$-coordinates by $M$ (the number of
 rows $N$ is the number of points), and considering $v$ as a $2\times 1$ column
 vector, we can compute the coordinates along the new axis by matrix
-multiplication:$$z=Mv$$
+multiplication:$$z=\begin{bmatrix}x_1 & y_1\\x_2 & y_2\\x_3 & y_3\\x_4 & y_4\end{bmatrix}\cdot\begin{bmatrix}\frac{1}{\sqrt{2}}\\\frac{1}{\sqrt{2}}\end{bmatrix}=Mv$$
 
 Note that the components $(v_x, v_y)$ of $v$ were chosen such the the length (or
 norm) of $v$, calculated as $$\lvert v \rvert = \sqrt{{v_x}^2 + {v_y}^2}$$ is
@@ -326,6 +336,29 @@ ggplot(df) + coord_fixed() + theme_bw() +
                aes(x = x, y = y, xend = xend, yend = yend), 
                size = 1, color = "green3")
 ```
+
+Let's calculate the Frobenius norm of the difference between the original data matrix 
+and the projected values above.
+
+```{r}
+M <- as.matrix(df)
+
+## Projection onto diagonal
+a <- b <- 1/sqrt(2)
+v <- rbind(a, b)
+df0 <- c(M %*% v)
+W <- cbind(df0 * a, df0 * b)
+(frob <- sqrt(sum((M - W) ^ 2)))
+
+## Projection onto x-axis
+a <- 1
+b <- 0
+v <- rbind(a, b)
+df0 <- c(M %*% v)
+W <- cbind(df0 * a, df0 * b)
+(frob <- sqrt(sum((M - W) ^ 2)))
+```
+
 
 # The singular value decomposition (SVD)
 
@@ -720,7 +753,7 @@ highly correlated variables.
 Let's see what happens if we instead run the PCA on scaled data:
 
 ```{r}
-mtcars_pcasc <- prcomp(mtcars, scale. = TRUE)
+mtcars_pcasc <- prcomp(mtcars, center = TRUE, scale. = TRUE)
 summary(mtcars_pcasc)
 plot(mtcars_pcasc)
 ```
@@ -753,7 +786,7 @@ ggplot(df2, aes(x = PC, y = variable, fill = rotation)) +
 ggplot(data.frame(mtcars_pcasc$rotation) %>% tibble::rownames_to_column("feature")) + 
   geom_segment(aes(xend = PC1, yend = PC2, x = 0, y = 0),
                arrow = arrow(length = unit(0.03, "npc"))) + 
-  theme_bw() + 
+  theme_bw() + labs(x = "PC1", y = "PC2") + 
   geom_text_repel(aes(x = PC1, y = PC2, label = feature))
 ```
 
@@ -995,7 +1028,9 @@ pairs of linear combinations with maximal covariance (PLS) or correlation (CCA).
 # Links to other material
 
 * Tools for exploration of PCA results: [explor](https://cran.r-project.org/web/packages/explor/index.html), [pcaExplorer](https://bioconductor.org/packages/pcaExplorer/)
-* 
+* [PCA explained visually](https://setosa.io/ev/principal-component-analysis/)
+* Points of significance on [Principal component analysis](https://www.nature.com/articles/nmeth.4346); Lever _et al_, Nature Methods 2017.
+* [What is principal component analysis](https://www.nature.com/articles/nbt0308-303); Ringnér, Nature Biotechnology 2008.
 
 # Session info
 
